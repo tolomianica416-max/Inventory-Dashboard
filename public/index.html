@@ -1,0 +1,151 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Inventory Dashboard</title>
+<style>
+  * { box-sizing: border-box; }
+  body { margin: 0; font-family: system-ui, sans-serif; background: #f1f5f9; color: #0f172a; }
+  header { background: #1e293b; color: #fff; padding: 18px 28px; font-size: 20px; font-weight: 600; }
+  main { max-width: 1000px; margin: 24px auto; padding: 0 16px; }
+  .cards { display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 16px; margin-bottom: 24px; }
+  .card { background: #fff; border-radius: 12px; padding: 18px; box-shadow: 0 1px 3px rgba(0,0,0,.08); }
+  .card small { color: #64748b; }
+  .card h2 { margin: 6px 0 0; font-size: 28px; }
+  .card.warn h2 { color: #dc2626; }
+  .panel { background: #fff; border-radius: 12px; padding: 18px; box-shadow: 0 1px 3px rgba(0,0,0,.08); margin-bottom: 24px; }
+  form { display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: 10px; }
+  input { padding: 10px; border: 1px solid #cbd5e1; border-radius: 8px; font-size: 14px; }
+  button { padding: 10px 14px; border: 0; border-radius: 8px; cursor: pointer; font-size: 14px; }
+  .primary { background: #2563eb; color: #fff; }
+  .edit { background: #fbbf24; }
+  .del { background: #ef4444; color: #fff; }
+  .cancel { background: #e2e8f0; }
+  .table-wrap { overflow-x: auto; }
+  table { width: 100%; border-collapse: collapse; }
+  th, td { text-align: left; padding: 10px; border-bottom: 1px solid #e2e8f0; white-space: nowrap; }
+  th { color: #64748b; font-size: 13px; }
+  .low { color: #dc2626; font-weight: 600; }
+  td button { margin-right: 4px; padding: 6px 10px; }
+</style>
+</head>
+<body>
+<header>📦 Inventory Dashboard</header>
+<main>
+  <div class="cards">
+    <div class="card"><small>Total Items</small><h2 id="totalItems">0</h2></div>
+    <div class="card"><small>Total Stock</small><h2 id="totalStock">0</h2></div>
+    <div class="card warn"><small>Low Stock (≤ 5)</small><h2 id="lowStock">0</h2></div>
+    <div class="card"><small>Inventory Value</small><h2 id="totalValue">₱0</h2></div>
+  </div>
+
+  <div class="panel">
+    <h3 id="formTitle" style="margin-top:0">Add Item</h3>
+    <form id="itemForm">
+      <input id="name" placeholder="Item name" required>
+      <input id="category" placeholder="Category" required>
+      <input id="quantity" type="number" min="0" placeholder="Quantity" required>
+      <input id="price" type="number" min="0" step="0.01" placeholder="Price" required>
+      <button class="primary" type="submit" id="saveBtn">Add</button>
+      <button class="cancel" type="button" id="cancelBtn" style="display:none">Cancel</button>
+    </form>
+  </div>
+
+  <div class="panel table-wrap">
+    <table>
+      <thead>
+        <tr><th>ID</th><th>Name</th><th>Category</th><th>Qty</th><th>Price</th><th>Actions</th></tr>
+      </thead>
+      <tbody id="tbody"></tbody>
+    </table>
+  </div>
+</main>
+
+<script>
+  const $ = (id) => document.getElementById(id);
+  let editId = null;
+  let items = [];
+
+  const peso = (n) => "₱" + Number(n).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+
+  async function load() {
+    const res = await fetch("/api/items");
+    items = await res.json();
+    render();
+  }
+
+  function render() {
+    $("tbody").innerHTML = items.map((i) => `
+      <tr>
+        <td>${i.id}</td>
+        <td>${escapeHtml(i.name)}</td>
+        <td>${escapeHtml(i.category)}</td>
+        <td class="${i.quantity <= 5 ? "low" : ""}">${i.quantity}</td>
+        <td>${peso(i.price)}</td>
+        <td>
+          <button class="edit" onclick="startEdit(${i.id})">Edit</button>
+          <button class="del" onclick="removeItem(${i.id})">Delete</button>
+        </td>
+      </tr>`).join("") || `<tr><td colspan="6">No items yet. Add one above.</td></tr>`;
+
+    $("totalItems").textContent = items.length;
+    $("totalStock").textContent = items.reduce((s, i) => s + i.quantity, 0);
+    $("lowStock").textContent = items.filter((i) => i.quantity <= 5).length;
+    $("totalValue").textContent = peso(items.reduce((s, i) => s + i.quantity * i.price, 0));
+  }
+
+  function escapeHtml(s) {
+    return String(s).replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
+  }
+
+  $("itemForm").addEventListener("submit", async (e) => {
+    e.preventDefault();
+    const body = {
+      name: $("name").value.trim(),
+      category: $("category").value.trim(),
+      quantity: $("quantity").value,
+      price: $("price").value,
+    };
+    const url = editId ? `/api/items/${editId}` : "/api/items";
+    await fetch(url, {
+      method: editId ? "PUT" : "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(body),
+    });
+    resetForm();
+    load();
+  });
+
+  function startEdit(id) {
+    const i = items.find((x) => x.id === id);
+    editId = id;
+    $("name").value = i.name;
+    $("category").value = i.category;
+    $("quantity").value = i.quantity;
+    $("price").value = i.price;
+    $("formTitle").textContent = "Edit Item #" + id;
+    $("saveBtn").textContent = "Update";
+    $("cancelBtn").style.display = "inline-block";
+    window.scrollTo({ top: 0, behavior: "smooth" });
+  }
+
+  async function removeItem(id) {
+    if (!confirm("Delete this item?")) return;
+    await fetch(`/api/items/${id}`, { method: "DELETE" });
+    load();
+  }
+
+  function resetForm() {
+    editId = null;
+    $("itemForm").reset();
+    $("formTitle").textContent = "Add Item";
+    $("saveBtn").textContent = "Add";
+    $("cancelBtn").style.display = "none";
+  }
+
+  $("cancelBtn").addEventListener("click", resetForm);
+  load();
+</script>
+</body>
+                                              </html>
